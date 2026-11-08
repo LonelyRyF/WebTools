@@ -1,13 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
 import { Sparkles } from 'lucide-react'
 
-interface HeaderProps {
-  onClearLibrary?: () => void
-  showClearLibrary?: boolean
-}
-
-export function Header({ onClearLibrary, showClearLibrary }: HeaderProps) {
+export function Header() {
   const location = useLocation()
   const isImagePage = location.pathname === '/image'
 
@@ -47,21 +41,6 @@ export function Header({ onClearLibrary, showClearLibrary }: HeaderProps) {
               <span className="hidden sm:inline">工作台</span>
             </Link>
           </nav>
-        </div>
-
-        <div className="flex items-center gap-2 sm:gap-2.5">
-          {showClearLibrary && onClearLibrary && (
-            <Button
-              onClick={onClearLibrary}
-              type="button"
-              variant="outline"
-              size="xs"
-              className="h-7 px-2 text-xs"
-            >
-              <span className="sm:hidden">清空</span>
-              <span className="hidden sm:inline">清空图库</span>
-            </Button>
-          )}
         </div>
       </div>
     </header>

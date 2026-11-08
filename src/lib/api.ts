@@ -61,18 +61,38 @@ export function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: mime })
 }
 
-export async function imageUrlToDataUrl(url: string): Promise<string> {
-  const response = await fetch(url)
+export function detectFormatFromBase64(base64: string): 'png' | 'jpeg' | 'webp' {
+  // Check magic bytes from leading base64 characters
+  const trimmed = base64.trim().slice(0, 16)
+  if (trimmed.startsWith('iVBORw0KGgo')) return 'png'
+  if (trimmed.startsWith('/9j/')) return 'jpeg'
+  if (trimmed.startsWith('UklGR')) return 'webp'
+  return 'png'
+}
+
+export function detectFormatFromMime(mime: string): 'png' | 'jpeg' | 'webp' {
+  if (mime.includes('webp')) return 'webp'
+  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpeg'
+  return 'png'
+}
+
+export async function imageUrlToDataUrl(
+  url: string,
+  signal?: AbortSignal
+): Promise<{ dataUrl: string; format: 'png' | 'jpeg' | 'webp' }> {
+  const response = await fetch(url, { signal })
   if (!response.ok) {
     throw new Error(`图片 URL 下载失败 (${response.status})`)
   }
   const blob = await response.blob()
-  return new Promise((resolve, reject) => {
+  const format = detectFormatFromMime(blob.type)
+  const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
     reader.onerror = reject
     reader.readAsDataURL(blob)
   })
+  return { dataUrl, format }
 }
 
 export function describeResponseStatus(status: string): string {
@@ -327,6 +347,7 @@ export async function requestImagesGeneration(
       size: snapshot.size,
       quality: snapshot.quality,
       response_format: 'b64_json',
+      output_format: snapshot.outputFormat,
     }),
     signal,
   })
@@ -358,6 +379,9 @@ export async function requestImagesEdit(
   form.append('size', snapshot.size)
   form.append('quality', snapshot.quality)
   form.append('response_format', 'b64_json')
+  if (snapshot.outputFormat) {
+    form.append('output_format', snapshot.outputFormat)
+  }
 
   snapshot.references.forEach((item, index) => {
     const blob = dataUrlToBlob(item.dataUrl)

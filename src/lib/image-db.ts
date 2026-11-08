@@ -157,22 +157,17 @@ export function openLibraryDatabase(): Promise<IDBDatabase> {
 }
 
 export async function readLibrarySnapshotFromDatabase(): Promise<LibraryItem[]> {
-  try {
-    const db = await openLibraryDatabase()
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(LIBRARY_DB.store, 'readonly')
-      const store = transaction.objectStore(LIBRARY_DB.store)
-      const request = store.getAll()
+  const db = await openLibraryDatabase()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(LIBRARY_DB.store, 'readonly')
+    const store = transaction.objectStore(LIBRARY_DB.store)
+    const request = store.getAll()
 
-      request.onsuccess = () => {
-        resolve(normalizeLibraryItems(request.result))
-      }
-      request.onerror = () => reject(request.error)
-    })
-  } catch (error) {
-    console.error('Failed to read from IndexedDB:', error)
-    return []
-  }
+    request.onsuccess = () => {
+      resolve(normalizeLibraryItems(request.result))
+    }
+    request.onerror = () => reject(request.error || new Error('IndexedDB read request failed'))
+  })
 }
 
 export async function writeLibrarySnapshotToDatabase(snapshot: LibraryItem[]): Promise<void> {

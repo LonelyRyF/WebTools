@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { LibraryItem } from '@/types/image'
-import { formatDate } from '@/lib/format'
+import { formatDate, downloadLibraryItem } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -25,7 +25,6 @@ interface ImagePreviewDialogProps {
   currentIndex: number
   totalCount: number
   onReuse: (id: string) => void
-  onDownload: (dataUrl: string, filename: string) => void
   onUploadToCloud?: (item: LibraryItem) => void
   isCloudConfigured?: boolean
 }
@@ -37,7 +36,6 @@ export function ImagePreviewDialog({
   currentIndex,
   totalCount,
   onReuse,
-  onDownload,
   onUploadToCloud,
   isCloudConfigured,
 }: ImagePreviewDialogProps) {
@@ -252,7 +250,7 @@ export function ImagePreviewDialog({
                   </Button>
                   <Button
                     className="w-full gap-1.5 text-xs h-8.5 sm:h-9 font-medium"
-                    onClick={() => onDownload(item.imageDataUrl, `image-${item.id}.png`)}
+                    onClick={() => downloadLibraryItem(item)}
                   >
                     <Download className="size-3.5" />
                     下载原图

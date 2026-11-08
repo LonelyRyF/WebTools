@@ -8,15 +8,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import type { ConfirmDialogState } from '@/hooks/useConfirmDialog'
 
-export interface ConfirmDialogState {
-  isOpen: boolean
-  title: string
-  description: string
-  confirmText?: string
-  variant?: 'default' | 'destructive'
-  action: () => void
-}
+export type { ConfirmDialogState }
 
 interface ConfirmDialogProps {
   dialog: ConfirmDialogState

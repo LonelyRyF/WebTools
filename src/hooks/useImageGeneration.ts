@@ -10,7 +10,7 @@ import type {
   OutputFormat,
 } from '@/types/image'
 import { createId, normalizeProvider } from '@/lib/image-db'
-import { getSize, requestImage, imageUrlToDataUrl } from '@/lib/api'
+import { getSize, requestImage, imageUrlToDataUrl, detectFormatFromBase64 } from '@/lib/api'
 import { toast } from 'sonner'
 
 export interface StartGenerationParams {
@@ -33,6 +33,8 @@ export function useImageGeneration() {
   const [isGenerating, setIsGenerating] = useState<boolean>(false)
   const [, setTick] = useState<number>(0)
 
+  const activeBatchIdRef = useRef<string | null>(null)
+  const isUnmountedRef = useRef<boolean>(false)
   const runningControllersRef = useRef<Map<string, AbortController>>(new Map())
   const cancelledBatchIdsRef = useRef<Set<string>>(new Set())
   const timerTickRef = useRef<number>(0)
@@ -68,27 +70,54 @@ export function useImageGeneration() {
     return { total, running, success, error, finished, queued }
   }, [batchJobs])
 
+  // Clean up running tasks on unmount: invalidate batch, abort all controllers
+  useEffect(() => {
+    isUnmountedRef.current = false
+    const controllers = runningControllersRef.current
+    const cancelledBatchIds = cancelledBatchIdsRef.current
+    return () => {
+      isUnmountedRef.current = true
+      const activeId = activeBatchIdRef.current
+      if (activeId) {
+        cancelledBatchIds.add(activeId)
+      }
+      controllers.forEach((controller) => {
+        try {
+          controller.abort()
+        } catch {
+          // ignore
+        }
+      })
+      controllers.clear()
+    }
+  }, [])
+
   // Stop Active Batch
   const stopActiveBatch = useCallback(() => {
     if (!activeBatchId) return
     cancelledBatchIdsRef.current.add(activeBatchId)
 
+    // Abort active controllers OUTSIDE the state updater to keep updater pure
+    runningControllersRef.current.forEach((controller) => {
+      try {
+        controller.abort()
+      } catch {
+        // ignore
+      }
+    })
+
     setJobs((prev) =>
       prev.map((j) => {
         if (j.batchId !== activeBatchId) return j
-        if (j.status === 'queued') {
+        if (j.status === 'queued' || j.status === 'running') {
           return {
             ...j,
             status: 'cancelled',
             completedAt: new Date().toISOString(),
             error: '任务已停止。',
             responseStatus: 'cancelled',
-            responseMessage: '任务未开始，已停止',
+            responseMessage: j.status === 'running' ? '请求已中断' : '任务未开始，已停止',
           }
-        }
-        if (j.status === 'running') {
-          const controller = runningControllersRef.current.get(j.id)
-          if (controller) controller.abort()
         }
         return j
       })
@@ -150,8 +179,13 @@ export function useImageGeneration() {
       }
 
       setActiveBatchId(batchId)
+      activeBatchIdRef.current = batchId
       cancelledBatchIdsRef.current.delete(batchId)
       setIsGenerating(true)
+
+      const isCancelledOrUnmounted = () => {
+        return isUnmountedRef.current || cancelledBatchIdsRef.current.has(batchId)
+      }
 
       const newJobs: GenerationJob[] = Array.from({ length: batchCount }, (_, index) => ({
         id: createId('job'),
@@ -171,21 +205,23 @@ export function useImageGeneration() {
 
       // Concurrency worker loop
       const executeJob = async (job: GenerationJob) => {
-        if (cancelledBatchIdsRef.current.has(batchId)) {
-          setJobs((prev) =>
-            prev.map((j) =>
-              j.id === job.id
-                ? {
-                    ...j,
-                    status: 'cancelled',
-                    completedAt: new Date().toISOString(),
-                    error: '任务已停止。',
-                    responseStatus: 'cancelled',
-                    responseMessage: '任务未开始，已停止',
-                  }
-                : j
+        if (isCancelledOrUnmounted()) {
+          if (!isUnmountedRef.current) {
+            setJobs((prev) =>
+              prev.map((j) =>
+                j.id === job.id
+                  ? {
+                      ...j,
+                      status: 'cancelled',
+                      completedAt: new Date().toISOString(),
+                      error: '任务已停止。',
+                      responseStatus: 'cancelled',
+                      responseMessage: '任务未开始，已停止',
+                    }
+                  : j
+              )
             )
-          )
+          }
           return
         }
 
@@ -211,12 +247,17 @@ export function useImageGeneration() {
           const payload = await requestImage(
             snapshot,
             (update) => {
+              if (isCancelledOrUnmounted()) return
               setJobs((prev) =>
                 prev.map((j) => (j.id === job.id ? { ...j, ...update } : j))
               )
             },
             controller.signal
           )
+
+          if (isCancelledOrUnmounted() || controller.signal.aborted) {
+            return
+          }
 
           // Text-only response
           if (payload.textResponse) {
@@ -238,10 +279,28 @@ export function useImageGeneration() {
             return
           }
 
-          // Image response
-          const imageDataUrl = payload.base64
-            ? `data:image/${snapshot.outputFormat || 'png'};base64,${payload.base64}`
-            : await imageUrlToDataUrl(payload.imageUrl!)
+          // Check if cancelled before converting/downloading image
+          if (isCancelledOrUnmounted() || controller.signal.aborted) {
+            return
+          }
+
+          // Image response: accurately determine MIME & output format from binary content
+          let imageDataUrl = ''
+          let actualFormat: OutputFormat = snapshot.outputFormat || 'png'
+
+          if (payload.base64) {
+            actualFormat = detectFormatFromBase64(payload.base64)
+            imageDataUrl = `data:image/${actualFormat};base64,${payload.base64}`
+          } else if (payload.imageUrl) {
+            const downloaded = await imageUrlToDataUrl(payload.imageUrl, controller.signal)
+            imageDataUrl = downloaded.dataUrl
+            actualFormat = downloaded.format
+          }
+
+          // Double check if cancelled before persisting
+          if (isCancelledOrUnmounted() || controller.signal.aborted) {
+            return
+          }
 
           const libraryItem: LibraryItem = {
             id: createId('img'),
@@ -251,7 +310,7 @@ export function useImageGeneration() {
             model: snapshot.model,
             providerName: snapshot.name || '',
             endpointType: snapshot.references.length > 0 ? 'images_edits' : 'images_generations',
-            outputFormat: snapshot.outputFormat || 'png',
+            outputFormat: actualFormat,
             imageDataUrl,
             createdAt: new Date().toISOString(),
             favorite: false,
@@ -261,6 +320,10 @@ export function useImageGeneration() {
           }
 
           onJobSuccess(libraryItem)
+
+          if (isCancelledOrUnmounted()) {
+            return
+          }
 
           setJobs((prev) =>
             prev.map((j) =>
@@ -279,6 +342,7 @@ export function useImageGeneration() {
             )
           )
         } catch (err: unknown) {
+          if (isUnmountedRef.current) return
           const isAbort = (err as { name?: string })?.name === 'AbortError'
           const errorMsg = (err as Error)?.message || '生成失败。'
           setJobs((prev) =>
@@ -305,7 +369,7 @@ export function useImageGeneration() {
         let cursor = 0
         const worker = async () => {
           while (cursor < newJobs.length) {
-            if (cancelledBatchIdsRef.current.has(batchId)) return
+            if (isCancelledOrUnmounted()) return
             const index = cursor
             cursor += 1
             const job = newJobs[index]
@@ -318,10 +382,15 @@ export function useImageGeneration() {
         const workers = Array.from({ length: concurrencyLimit }, () => worker())
         await Promise.allSettled(workers)
 
-        toast.success('批次执行完成')
+        if (!isCancelledOrUnmounted()) {
+          toast.success('批次执行完成')
+        }
       } finally {
-        setIsGenerating(false)
-        setActiveBatchId(null)
+        if (!isUnmountedRef.current) {
+          setIsGenerating(false)
+          setActiveBatchId(null)
+          activeBatchIdRef.current = null
+        }
       }
     },
     [isGenerating]

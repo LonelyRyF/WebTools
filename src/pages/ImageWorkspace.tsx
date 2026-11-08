@@ -1,8 +1,6 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
-import type { QualityTier, SizeTier, OutputFormat, LibraryItem } from '@/types/image'
-import { aspectRatioMap } from '@/lib/api'
-import { downloadImage, getBatchElapsedMs } from '@/lib/format'
-import { uploadImageToStorage } from '@/lib/storage'
+import { useState, useRef } from 'react'
+import type { LibraryItem } from '@/types/image'
+import { getBatchElapsedMs } from '@/lib/format'
 
 // Custom Hooks
 import { useProviders } from '@/hooks/useProviders'
@@ -11,6 +9,8 @@ import { useReferenceImages } from '@/hooks/useReferenceImages'
 import { useImageLibrary } from '@/hooks/useImageLibrary'
 import { useImageGeneration } from '@/hooks/useImageGeneration'
 import { useImagePreview } from '@/hooks/useImagePreview'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { useGenerationOptions } from '@/hooks/useGenerationOptions'
 
 // Shadcn UI Components
 import { Button } from '@/components/ui/button'
@@ -29,58 +29,21 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { WorkspaceHeader } from '@/components/image-workspace/WorkspaceHeader'
 import { BatchProgressBanner } from '@/components/image-workspace/BatchProgressBanner'
 import { StudioControlPanel } from '@/components/image-workspace/StudioControlPanel'
+import { ParamsTab } from '@/components/image-workspace/control-panel/ParamsTab'
+import { ReferenceTab } from '@/components/image-workspace/control-panel/ReferenceTab'
+import { QueueTab } from '@/components/image-workspace/control-panel/QueueTab'
 import { PromptComposer } from '@/components/image-workspace/PromptComposer'
 import { ImageLibrary } from '@/components/image-workspace/ImageLibrary'
-import {
-  WorkspaceDialogs,
-  type ConfirmDialogState,
-} from '@/components/image-workspace/WorkspaceDialogs'
+import { WorkspaceDialogs } from '@/components/image-workspace/WorkspaceDialogs'
 
 // Lucide Icons
 import { SlidersHorizontal, ChevronRight } from 'lucide-react'
 
-export function ImageWorkspace({
-  onRegisterClear,
-}: {
-  onRegisterClear?: (cb: () => void) => void
-}) {
+export function ImageWorkspace() {
   // Global Confirmation Alert Dialog State
-  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
-    isOpen: false,
-    title: '',
-    description: '',
-    confirmText: '确认',
-    variant: 'default',
-    action: () => {},
-  })
+  const { confirmDialog, requestConfirm, closeConfirm } = useConfirmDialog()
 
-  const requestConfirm = useCallback(
-    (
-      title: string,
-      description: string,
-      action: () => void,
-      variant: 'default' | 'destructive' = 'default'
-    ) => {
-      setConfirmDialog({
-        isOpen: true,
-        title,
-        description,
-        confirmText: variant === 'destructive' ? '确认删除' : '确认',
-        variant,
-        action,
-      })
-    },
-    []
-  )
-
-  // Generation Options State
-  const [prompt, setPrompt] = useState<string>('')
-  const [quality, setQuality] = useState<QualityTier>('auto')
-  const [outputFormat, setOutputFormat] = useState<OutputFormat>('png')
-  const [sizeTier, setSizeTier] = useState<SizeTier>('auto')
-  const [aspectRatio, setAspectRatio] = useState<string>('1:1')
-  const [batchCount, setBatchCount] = useState<number>(4)
-  const [parallelCount, setParallelCount] = useState<number>(2)
+  // Tab & Drawer State
   const [sidebarTab, setSidebarTab] = useState<'params' | 'reference' | 'queue'>('params')
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false)
 
@@ -88,80 +51,56 @@ export function ImageWorkspace({
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Domain Hooks
-  const providersControl = useProviders(outputFormat)
+  const providersControl = useProviders()
   const storageControl = useCloudStorage()
+  const optionsControl = useGenerationOptions(providersControl.selectedProvider.outputFormat)
   const imagesControl = useReferenceImages(() => {
     setSidebarTab('reference')
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       setIsMobileSidebarOpen(true)
     }
   })
-  const libraryControl = useImageLibrary({ onRegisterClear, requestConfirm })
+  const libraryControl = useImageLibrary({ requestConfirm })
   const generationControl = useImageGeneration()
-  const previewControl = useImagePreview(libraryControl.filteredLibrary)
 
-  // Aspect ratio synchronization when size tier changes
-  const availableAspectRatios = useMemo(() => {
-    return aspectRatioMap[sizeTier] || aspectRatioMap.auto
-  }, [sizeTier])
+  // Single source of truth for preview derived from library
+  const previewControl = useImagePreview({
+    library: libraryControl.library,
+    filteredItems: libraryControl.filteredLibrary,
+  })
 
-  const handleSizeTierChange = (newTier: SizeTier) => {
-    setSizeTier(newTier)
-    const ratios = aspectRatioMap[newTier] || aspectRatioMap.auto
-    if (!ratios.includes(aspectRatio)) {
-      setAspectRatio(ratios[0] || '1:1')
-    }
-  }
-
-  // Generation Trigger with Auto-cloud-backup
+  // Start generation with unified auto-cloud-backup
   const handleStartGeneration = async () => {
     setSidebarTab('queue')
     await generationControl.startBatchGeneration({
-      provider: providersControl.providerForm,
-      prompt,
-      quality,
-      outputFormat,
-      sizeTier,
-      aspectRatio,
-      batchCount,
-      parallelCount,
+      provider: providersControl.selectedProvider,
+      prompt: optionsControl.prompt,
+      quality: optionsControl.quality,
+      outputFormat: optionsControl.outputFormat,
+      sizeTier: optionsControl.sizeTier,
+      aspectRatio: optionsControl.aspectRatio,
+      batchCount: optionsControl.batchCount,
+      parallelCount: optionsControl.parallelCount,
       references: imagesControl.referenceImages,
-      onOpenProviderDialog: () => providersControl.setIsProviderDialogOpen(true),
+      onOpenProviderDialog: providersControl.openProviderDialog,
       onJobSuccess: (item) => {
         libraryControl.addLibraryItem(item)
 
-        // Automatic Cloud Storage Sync if enabled
-        const cfg = storageControl.storageConfig
-        if (cfg.type !== 'local' && cfg.autoUpload) {
-          uploadImageToStorage(item, cfg)
-            .then((res) => {
-              if (res.success && res.url) {
-                libraryControl.updateLibraryItem(item.id, {
-                  cloudUrl: res.url,
-                  cloudStorageType: cfg.type as 's3' | 'webdav',
-                  cloudUploadedAt: new Date().toISOString(),
-                })
-              }
-            })
-            .catch((err) => console.warn('Auto upload error:', err))
-        }
+        // Automatic Cloud Storage Sync (unified in hook)
+        storageControl.uploadAuto(item).then((metadata) => {
+          if (metadata) {
+            libraryControl.updateLibraryItem(item.id, metadata)
+          }
+        })
       },
     })
   }
 
-  // Manual Cloud Uploads
+  // Manual Cloud Uploads using unified metadata
   const handleUploadSingleToCloud = async (item: LibraryItem) => {
-    const url = await storageControl.uploadSingle(item)
-    if (url) {
-      const updates = {
-        cloudUrl: url,
-        cloudStorageType: storageControl.storageConfig.type as 's3' | 'webdav',
-        cloudUploadedAt: new Date().toISOString(),
-      }
-      libraryControl.updateLibraryItem(item.id, updates)
-      if (previewControl.previewItem?.id === item.id) {
-        previewControl.updatePreviewItem(updates)
-      }
+    const metadata = await storageControl.uploadSingle(item)
+    if (metadata) {
+      libraryControl.updateLibraryItem(item.id, metadata)
     }
   }
 
@@ -173,15 +112,7 @@ export function ImageWorkspace({
 
     const resultMap = await storageControl.uploadBatch(items)
     if (resultMap.size > 0) {
-      const updatesMap = new Map<string, Partial<LibraryItem>>()
-      resultMap.forEach((url, id) => {
-        updatesMap.set(id, {
-          cloudUrl: url,
-          cloudStorageType: storageControl.storageConfig.type as 's3' | 'webdav',
-          cloudUploadedAt: new Date().toISOString(),
-        })
-      })
-      libraryControl.updateBatchItems(updatesMap)
+      libraryControl.updateBatchItems(resultMap)
     }
   }
 
@@ -193,40 +124,54 @@ export function ImageWorkspace({
     )
   }
 
-  // Studio Control Panel Element (shared between desktop sidebar & mobile drawer)
+  // Studio Control Panel Element composed cleanly via children slots
   const studioPanelContent = (
     <StudioControlPanel
-      sidebarTab={sidebarTab}
+      activeTab={sidebarTab}
       onTabChange={setSidebarTab}
-      providers={providersControl.providers}
-      selectedProviderId={providersControl.selectedProviderId}
-      onSelectProvider={(id) => providersControl.handleSelectProvider(id, setOutputFormat)}
-      onOpenProviderDialog={() => {
-        setIsMobileSidebarOpen(false)
-        providersControl.setIsProviderDialogOpen(true)
-      }}
-      aspectRatio={aspectRatio}
-      onAspectRatioChange={setAspectRatio}
-      availableAspectRatios={availableAspectRatios}
-      sizeTier={sizeTier}
-      onSizeTierChange={handleSizeTierChange}
-      quality={quality}
-      onQualityChange={setQuality}
-      outputFormat={outputFormat}
-      onOutputFormatChange={setOutputFormat}
-      batchCount={batchCount}
-      onBatchCountChange={setBatchCount}
-      parallelCount={parallelCount}
-      onParallelCountChange={setParallelCount}
-      references={imagesControl.referenceImages}
-      onRemoveReference={imagesControl.removeReference}
-      onClearReferences={imagesControl.clearReferences}
-      onFileInputClick={() => fileInputRef.current?.click()}
-      onFilesDrop={imagesControl.handleFiles}
-      batchStats={generationControl.batchStats}
-      focusedBatchId={generationControl.focusedBatchId}
-      batchJobs={generationControl.batchJobs}
+      referenceCount={imagesControl.referenceImages.length}
       isGenerating={generationControl.isGenerating}
+      params={
+        <ParamsTab
+          providers={providersControl.providers}
+          selectedProviderId={providersControl.selectedProviderId}
+          onSelectProvider={providersControl.selectActiveProvider}
+          onOpenProviderDialog={() => {
+            setIsMobileSidebarOpen(false)
+            providersControl.openProviderDialog()
+          }}
+          aspectRatio={optionsControl.aspectRatio}
+          onAspectRatioChange={optionsControl.setAspectRatio}
+          availableAspectRatios={optionsControl.availableAspectRatios}
+          sizeTier={optionsControl.sizeTier}
+          onSizeTierChange={optionsControl.setSizeTier}
+          quality={optionsControl.quality}
+          onQualityChange={optionsControl.setQuality}
+          outputFormat={optionsControl.outputFormat}
+          onOutputFormatChange={optionsControl.setOutputFormat}
+          batchCount={optionsControl.batchCount}
+          onBatchCountChange={optionsControl.setBatchCount}
+          parallelCount={optionsControl.parallelCount}
+          onParallelCountChange={optionsControl.setParallelCount}
+        />
+      }
+      reference={
+        <ReferenceTab
+          references={imagesControl.referenceImages}
+          onRemoveReference={imagesControl.removeReference}
+          onClearReferences={imagesControl.clearReferences}
+          onFileInputClick={() => fileInputRef.current?.click()}
+          onFilesDrop={imagesControl.handleFiles}
+        />
+      }
+      queue={
+        <QueueTab
+          batchStats={generationControl.batchStats}
+          focusedBatchId={generationControl.focusedBatchId}
+          batchJobs={generationControl.batchJobs}
+          isGenerating={generationControl.isGenerating}
+        />
+      }
     />
   )
 
@@ -237,8 +182,8 @@ export function ImageWorkspace({
         <WorkspaceHeader
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           referencesCount={imagesControl.referenceImages.length}
-          onApplyPromptPreset={(p) => setPrompt(p)}
-          onOpenProviderDialog={() => providersControl.setIsProviderDialogOpen(true)}
+          onApplyPromptPreset={optionsControl.setPrompt}
+          onOpenProviderDialog={providersControl.openProviderDialog}
           onOpenStorageDialog={() => storageControl.setIsStorageDialogOpen(true)}
           storageType={storageControl.storageConfig.type}
           onClearLibrary={libraryControl.clearLibrary}
@@ -251,8 +196,8 @@ export function ImageWorkspace({
         {generationControl.isGenerating && (
           <BatchProgressBanner
             focusedBatchId={generationControl.focusedBatchId}
-            batchCount={batchCount}
-            parallelCount={parallelCount}
+            batchCount={optionsControl.batchCount}
+            parallelCount={optionsControl.parallelCount}
             batchStats={generationControl.batchStats}
             elapsedMs={getBatchElapsedMs(generationControl.batchJobs)}
             onStop={generationControl.stopActiveBatch}
@@ -285,17 +230,17 @@ export function ImageWorkspace({
 
           <div className="space-y-4 min-w-0">
             <PromptComposer
-              prompt={prompt}
-              onPromptChange={setPrompt}
+              prompt={optionsControl.prompt}
+              onPromptChange={optionsControl.setPrompt}
               onGenerate={handleStartGeneration}
               onStop={generationControl.stopActiveBatch}
               isGenerating={generationControl.isGenerating}
               referencesCount={imagesControl.referenceImages.length}
-              batchCount={batchCount}
+              batchCount={optionsControl.batchCount}
             />
 
             <ImageLibrary
-              library={libraryControl.library}
+              totalCount={libraryControl.library.length}
               filteredItems={libraryControl.filteredLibrary}
               selectedImageIds={libraryControl.selectedImageIds}
               filter={libraryControl.filter}
@@ -311,21 +256,8 @@ export function ImageWorkspace({
               onOpenPreview={previewControl.openPreview}
               onReuse={handleReuse}
               onDownloadSelected={libraryControl.downloadSelected}
-              onDeleteSelected={(ids) =>
-                libraryControl.deleteSelected(ids, (deleted) => {
-                  if (previewControl.previewItem && deleted.has(previewControl.previewItem.id)) {
-                    previewControl.closePreview()
-                  }
-                })
-              }
-              onDownloadSingle={downloadImage}
-              onDeleteSingle={(id) =>
-                libraryControl.deleteSelected([id], () => {
-                  if (previewControl.previewItem?.id === id) {
-                    previewControl.closePreview()
-                  }
-                })
-              }
+              onDeleteSelected={libraryControl.deleteSelected}
+              onDeleteSingle={(id) => libraryControl.deleteSelected([id])}
               isCloudConfigured={storageControl.storageConfig.type !== 'local'}
               onUploadSelectedToCloud={handleUploadSelectedToCloud}
               onUploadSingleToCloud={handleUploadSingleToCloud}
@@ -367,15 +299,17 @@ export function ImageWorkspace({
         {/* All Modals & Dialogs Unified */}
         <WorkspaceDialogs
           isProviderDialogOpen={providersControl.isProviderDialogOpen}
-          onProviderDialogChange={providersControl.setIsProviderDialogOpen}
+          onProviderDialogChange={(open) =>
+            open ? providersControl.openProviderDialog() : providersControl.closeProviderDialog()
+          }
           providers={providersControl.providers}
-          selectedProviderId={providersControl.selectedProviderId}
-          onSelectProvider={(id) => providersControl.handleSelectProvider(id, setOutputFormat)}
-          providerForm={providersControl.providerForm}
-          onUpdateProviderForm={providersControl.setProviderForm}
-          onSaveProvider={() => providersControl.handleSaveProvider(outputFormat)}
-          onNewProvider={providersControl.handleNewProvider}
-          onDeleteProvider={() => providersControl.handleDeleteProvider(requestConfirm)}
+          providerForm={providersControl.providerDraft}
+          onSelectDraftProvider={providersControl.selectDraftProvider}
+          onUpdateProviderForm={providersControl.setProviderDraft}
+          onSaveProvider={() => providersControl.saveProviderDraft(providersControl.providerDraft)}
+          onNewProvider={providersControl.createNewProviderDraft}
+          onDeleteProvider={() => providersControl.deleteOrDiscardDraft(requestConfirm)}
+          isDraftNew={providersControl.isDraftNew}
           isStorageDialogOpen={storageControl.isStorageDialogOpen}
           onStorageDialogChange={storageControl.setIsStorageDialogOpen}
           storageConfig={storageControl.storageConfig}
@@ -388,7 +322,7 @@ export function ImageWorkspace({
           onReuseImage={(id) => handleReuse([id])}
           onUploadToCloud={handleUploadSingleToCloud}
           confirmDialog={confirmDialog}
-          onCloseConfirmDialog={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
+          onCloseConfirmDialog={closeConfirm}
         />
       </div>
     </TooltipProvider>

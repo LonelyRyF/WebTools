@@ -1,47 +1,66 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import type { LibraryItem } from '@/types/image'
 
-export function useImagePreview(items: LibraryItem[]) {
-  const [previewItem, setPreviewItem] = useState<LibraryItem | null>(null)
-  const [previewIndex, setPreviewIndex] = useState<number>(-1)
+interface UseImagePreviewOptions {
+  library: LibraryItem[]
+  filteredItems: LibraryItem[]
+}
 
-  const openPreview = useCallback(
-    (item: LibraryItem) => {
-      const idx = items.findIndex((x) => x.id === item.id)
-      setPreviewItem(item)
-      setPreviewIndex(idx >= 0 ? idx : 0)
-    },
-    [items]
-  )
+export function useImagePreview({ library, filteredItems }: UseImagePreviewOptions) {
+  const [previewId, setPreviewId] = useState<string | null>(null)
+
+  // Derive previewItem from the full library so even if filters change, the item data is stable
+  const previewItem = useMemo(() => {
+    if (!previewId) return null
+    return library.find((item) => item.id === previewId) ?? null
+  }, [library, previewId])
+
+  // Derive index from currently filtered view for navigation
+  const previewIndex = useMemo(() => {
+    if (!previewId) return -1
+    return filteredItems.findIndex((item) => item.id === previewId)
+  }, [filteredItems, previewId])
+
+  const openPreview = useCallback((id: string) => {
+    setPreviewId(id)
+  }, [])
 
   const closePreview = useCallback(() => {
-    setPreviewItem(null)
+    setPreviewId(null)
   }, [])
 
   const navigatePreview = useCallback(
     (step: number) => {
-      if (items.length === 0) return
-      const nextIdx = previewIndex + step
-      if (nextIdx < 0 || nextIdx >= items.length) return
-      setPreviewIndex(nextIdx)
-      setPreviewItem(items[nextIdx])
+      if (filteredItems.length === 0) return
+      let nextIdx = previewIndex + step
+      if (nextIdx < 0) nextIdx = 0
+      if (nextIdx >= filteredItems.length) nextIdx = filteredItems.length - 1
+      const nextItem = filteredItems[nextIdx]
+      if (nextItem) {
+        setPreviewId(nextItem.id)
+      }
     },
-    [items, previewIndex]
+    [filteredItems, previewIndex]
   )
 
-  // Sync updated item data into previewItem (e.g. cloudUrl added)
-  const updatePreviewItem = useCallback((updated: Partial<LibraryItem>) => {
-    setPreviewItem((prev) => (prev ? { ...prev, ...updated } : null))
-  }, [])
+  // If previewId no longer exists in library, treat effective active item as null
+  const effectivePreviewId = previewItem ? previewId : null
 
-  // Keyboard navigation
+  // Keyboard navigation for active modal - only active when previewItem actually exists
   useEffect(() => {
+    if (!previewItem) return
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!previewItem) return
+      // Don't intercept if user is typing in an input/textarea
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
       if (e.key === 'ArrowLeft') {
         navigatePreview(-1)
       } else if (e.key === 'ArrowRight') {
         navigatePreview(1)
+      } else if (e.key === 'Escape') {
+        setPreviewId(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -49,11 +68,11 @@ export function useImagePreview(items: LibraryItem[]) {
   }, [previewItem, navigatePreview])
 
   return {
+    previewId: effectivePreviewId,
     previewItem,
     previewIndex,
     openPreview,
     closePreview,
     navigatePreview,
-    updatePreviewItem,
   }
 }

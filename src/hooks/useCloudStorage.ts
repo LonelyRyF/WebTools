@@ -4,6 +4,11 @@ import type { LibraryItem } from '@/types/image'
 import { loadStorageConfig, saveStorageConfig, uploadImageToStorage } from '@/lib/storage'
 import { toast } from 'sonner'
 
+export type CloudUploadMetadata = Pick<
+  LibraryItem,
+  'cloudUrl' | 'cloudStorageType' | 'cloudUploadedAt'
+>
+
 export function useCloudStorage() {
   const [storageConfig, setStorageConfig] = useState<StorageConfig>(() => loadStorageConfig())
   const [isStorageDialogOpen, setIsStorageDialogOpen] = useState<boolean>(false)
@@ -13,8 +18,44 @@ export function useCloudStorage() {
     saveStorageConfig(newCfg)
   }, [])
 
+  // Core unified upload executor
+  const performUpload = useCallback(
+    async (item: LibraryItem): Promise<CloudUploadMetadata | null> => {
+      if (storageConfig.type === 'local') return null
+      const res = await uploadImageToStorage(item, storageConfig)
+      if (res.success && res.url) {
+        return {
+          cloudUrl: res.url,
+          cloudStorageType: storageConfig.type as 's3' | 'webdav',
+          cloudUploadedAt: new Date().toISOString(),
+        }
+      }
+      return null
+    },
+    [storageConfig]
+  )
+
+  // Auto upload after image generation (silent with error logging)
+  const uploadAuto = useCallback(
+    async (item: LibraryItem): Promise<CloudUploadMetadata | null> => {
+      if (storageConfig.type === 'local' || !storageConfig.autoUpload) return null
+      try {
+        const metadata = await performUpload(item)
+        if (!metadata) {
+          console.warn('Auto upload returned failure status')
+        }
+        return metadata
+      } catch (err) {
+        console.warn('Auto upload error:', err)
+        return null
+      }
+    },
+    [performUpload, storageConfig]
+  )
+
+  // Manual single upload with toast feedback
   const uploadSingle = useCallback(
-    async (item: LibraryItem): Promise<string | null> => {
+    async (item: LibraryItem): Promise<CloudUploadMetadata | null> => {
       if (storageConfig.type === 'local') {
         setIsStorageDialogOpen(true)
         toast.info('请先配置并启用 S3 或 WebDAV 云存储')
@@ -24,12 +65,12 @@ export function useCloudStorage() {
       const toastId = `upload-${item.id}`
       toast.loading(`正在上传至 ${storageConfig.type.toUpperCase()}...`, { id: toastId })
       try {
-        const res = await uploadImageToStorage(item, storageConfig)
-        if (res.success && res.url) {
+        const metadata = await performUpload(item)
+        if (metadata) {
           toast.success(`上传成功！已同步至 ${storageConfig.type.toUpperCase()}`, { id: toastId })
-          return res.url
+          return metadata
         } else {
-          toast.error(res.error || '上传失败', { id: toastId })
+          toast.error('上传失败，请检查云存储配置与连接', { id: toastId })
           return null
         }
       } catch (e: unknown) {
@@ -37,12 +78,13 @@ export function useCloudStorage() {
         return null
       }
     },
-    [storageConfig]
+    [performUpload, storageConfig]
   )
 
+  // Manual batch upload with summary toast
   const uploadBatch = useCallback(
-    async (items: LibraryItem[]): Promise<Map<string, string>> => {
-      const resultMap = new Map<string, string>()
+    async (items: LibraryItem[]): Promise<Map<string, CloudUploadMetadata>> => {
+      const resultMap = new Map<string, CloudUploadMetadata>()
       if (items.length === 0) return resultMap
 
       if (storageConfig.type === 'local') {
@@ -61,10 +103,10 @@ export function useCloudStorage() {
 
       for (const item of items) {
         try {
-          const res = await uploadImageToStorage(item, storageConfig)
-          if (res.success && res.url) {
+          const metadata = await performUpload(item)
+          if (metadata) {
             successCount += 1
-            resultMap.set(item.id, res.url)
+            resultMap.set(item.id, metadata)
           } else {
             failCount += 1
           }
@@ -81,7 +123,7 @@ export function useCloudStorage() {
 
       return resultMap
     },
-    [storageConfig]
+    [performUpload, storageConfig]
   )
 
   return {
@@ -89,6 +131,7 @@ export function useCloudStorage() {
     isStorageDialogOpen,
     setIsStorageDialogOpen,
     handleSaveConfig,
+    uploadAuto,
     uploadSingle,
     uploadBatch,
   }

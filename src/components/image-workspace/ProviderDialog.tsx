@@ -21,26 +21,26 @@ interface ProviderDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   providers: ProviderConfig[]
-  selectedProviderId: string
-  onSelectProvider: (id: string) => void
   providerForm: ProviderConfig
+  onSelectDraftProvider: (id: string) => void
   onUpdateProviderForm: (form: ProviderConfig) => void
   onSave: () => void
   onNew: () => void
   onDelete: () => void
+  isDraftNew?: boolean
 }
 
 export function ProviderDialog({
   open,
   onOpenChange,
   providers,
-  selectedProviderId,
-  onSelectProvider,
   providerForm,
+  onSelectDraftProvider,
   onUpdateProviderForm,
   onSave,
   onNew,
   onDelete,
+  isDraftNew = false,
 }: ProviderDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -54,12 +54,24 @@ export function ProviderDialog({
 
         <div className="space-y-3.5 py-1">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-foreground">当前配置</label>
-            <Select value={selectedProviderId} onValueChange={onSelectProvider}>
+            <label className="text-xs font-medium text-foreground">切换/编辑配置</label>
+            <Select
+              value={isDraftNew ? 'new-draft' : providerForm.id}
+              onValueChange={(val) => {
+                if (val !== 'new-draft') {
+                  onSelectDraftProvider(val)
+                }
+              }}
+            >
               <SelectTrigger className="w-full text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                {isDraftNew && (
+                  <SelectItem value="new-draft" className="text-xs italic text-blue-500">
+                    * [新建草稿] {providerForm.name || '未命名'}
+                  </SelectItem>
+                )}
                 {providers.map((p) => (
                   <SelectItem key={p.id} value={p.id} className="text-xs">
                     {p.name}
@@ -117,12 +129,12 @@ export function ProviderDialog({
               新建
             </Button>
             <Button
-              variant="destructive"
+              variant={isDraftNew ? 'outline' : 'destructive'}
               size="sm"
               onClick={onDelete}
-              disabled={providers.length <= 1}
+              disabled={!isDraftNew && providers.length <= 1}
             >
-              删除
+              {isDraftNew ? '放弃' : '删除'}
             </Button>
           </div>
           <Button size="sm" onClick={onSave}>

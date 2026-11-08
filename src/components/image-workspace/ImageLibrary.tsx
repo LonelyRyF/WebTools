@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 
 interface ImageLibraryProps {
-  library: LibraryItem[]
+  totalCount: number
   filteredItems: LibraryItem[]
   selectedImageIds: Set<string>
   filter: 'all' | 'favorite' | 'edited'
@@ -35,11 +35,10 @@ interface ImageLibraryProps {
   isAllSelected: boolean
   onToggleSelect: (id: string) => void
   onToggleFavorite: (id: string) => void
-  onOpenPreview: (item: LibraryItem) => void
+  onOpenPreview: (id: string) => void
   onReuse: (ids: string[]) => void
   onDownloadSelected: () => void
   onDeleteSelected: (ids: string[]) => void
-  onDownloadSingle: (dataUrl: string, filename: string) => void
   onDeleteSingle: (id: string) => void
   isCloudConfigured?: boolean
   onUploadSelectedToCloud?: () => void
@@ -47,7 +46,7 @@ interface ImageLibraryProps {
 }
 
 export function ImageLibrary({
-  library,
+  totalCount,
   filteredItems,
   selectedImageIds,
   filter,
@@ -64,7 +63,6 @@ export function ImageLibrary({
   onReuse,
   onDownloadSelected,
   onDeleteSelected,
-  onDownloadSingle,
   onDeleteSingle,
   isCloudConfigured,
   onUploadSelectedToCloud,
@@ -79,7 +77,7 @@ export function ImageLibrary({
             <div className="flex items-center gap-2">
               <CardTitle className="text-sm font-semibold sm:text-base">生成图库</CardTitle>
               <Badge variant="secondary" className="text-xs">
-                {library.length}
+                {totalCount}
               </Badge>
             </div>
 
@@ -184,7 +182,7 @@ export function ImageLibrary({
             <ImageIcon className="size-9 text-muted-foreground/50" />
             <p className="mt-2.5 text-sm font-semibold text-foreground">暂无符合条件的图片</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {library.length === 0 ? '完成生成任务后，图片将实时保存在此。' : '请尝试调整筛选或搜索关键词。'}
+              {totalCount === 0 ? '完成生成任务后，图片将实时保存在此。' : '请尝试调整筛选或搜索关键词。'}
             </p>
           </div>
         ) : (
@@ -198,7 +196,6 @@ export function ImageLibrary({
                 onToggleFavorite={onToggleFavorite}
                 onOpenPreview={onOpenPreview}
                 onReuse={(id) => onReuse([id])}
-                onDownload={onDownloadSingle}
                 onDelete={(id) => onDeleteSingle(id)}
                 onUploadToCloud={onUploadSingleToCloud}
                 isCloudConfigured={isCloudConfigured}

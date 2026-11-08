@@ -6,8 +6,9 @@ import {
   writeLibrarySnapshotToDatabase,
   loadLibraryFromLocalFallback,
   persistLibrary,
+  mergeLibraryItems,
 } from '@/lib/image-db'
-import { downloadImage } from '@/lib/format'
+import { downloadLibraryItem } from '@/lib/format'
 import { toast } from 'sonner'
 
 interface UseImageLibraryOptions {
@@ -25,6 +26,7 @@ export function useImageLibrary({
   requestConfirm,
 }: UseImageLibraryOptions) {
   const [library, setLibrary] = useState<LibraryItem[]>([])
+  const [initStatus, setInitStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set())
 
   // Filters & Search
@@ -32,41 +34,73 @@ export function useImageLibrary({
   const [search, setSearch] = useState<string>('')
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
 
-  // Initialize from IndexedDB
-  useEffect(() => {
-    let isMounted = true
-    const initLibrary = async () => {
-      let items: LibraryItem[] = []
-      try {
-        items = await readLibrarySnapshotFromDatabase()
-      } catch (e) {
-        console.error('Failed to read IndexedDB:', e)
-      }
+  // Initialize from IndexedDB with strict failure guard
+  const loadLibrary = useCallback(async () => {
+    try {
+      let items = await readLibrarySnapshotFromDatabase()
 
+      // If IndexedDB is clean empty, check legacy localStorage fallback
       if (items.length === 0) {
-        items = loadLibraryFromLocalFallback()
-        if (items.length > 0) {
+        const fallback = loadLibraryFromLocalFallback()
+        if (fallback.length > 0) {
           try {
-            await writeLibrarySnapshotToDatabase(items)
+            await writeLibrarySnapshotToDatabase(fallback)
             localStorage.removeItem(STORAGE_KEYS.library)
             localStorage.removeItem(STORAGE_KEYS.legacyHistory)
-          } catch (e) {
-            console.error('Migration error:', e)
+            items = fallback
+          } catch (migrationErr) {
+            console.error('Migration error:', migrationErr)
           }
         }
       }
 
-      if (isMounted) {
-        setLibrary(items)
-      }
+      setLibrary((prev) => mergeLibraryItems(prev, items))
+      setInitStatus('ready')
+    } catch (err) {
+      console.error('Failed to read IndexedDB snapshot:', err)
+      setInitStatus('error')
+      toast.error('图库数据读取失败，已暂停持久化同步以防数据覆盖。请刷新重试。')
     }
+  }, [])
 
-    initLibrary()
+  useEffect(() => {
+    let isMounted = true
+    readLibrarySnapshotFromDatabase()
+      .then((items) => {
+        if (!isMounted) return
+        if (items.length === 0) {
+          const fallback = loadLibraryFromLocalFallback()
+          if (fallback.length > 0) {
+            writeLibrarySnapshotToDatabase(fallback).catch((e) =>
+              console.error('Migration error:', e)
+            )
+            localStorage.removeItem(STORAGE_KEYS.library)
+            localStorage.removeItem(STORAGE_KEYS.legacyHistory)
+            setLibrary((prev) => mergeLibraryItems(prev, fallback))
+            setInitStatus('ready')
+            return
+          }
+        }
+        setLibrary((prev) => mergeLibraryItems(prev, items))
+        setInitStatus('ready')
+      })
+      .catch((err) => {
+        if (!isMounted) return
+        console.error('Failed to read IndexedDB snapshot:', err)
+        setInitStatus('error')
+        toast.error('图库数据读取失败，已暂停持久化同步以防数据覆盖。请刷新重试。')
+      })
 
     return () => {
       isMounted = false
     }
   }, [])
+
+  // Centralized persistence effect: ONLY write when initStatus is strictly 'ready'
+  useEffect(() => {
+    if (initStatus !== 'ready') return
+    persistLibrary(library)
+  }, [library, initStatus])
 
   // Clear library
   const clearLibrary = useCallback(() => {
@@ -77,7 +111,6 @@ export function useImageLibrary({
       () => {
         setLibrary([])
         setSelectedImageIds(new Set())
-        persistLibrary([])
         toast.success('图库已清空')
       },
       'destructive'
@@ -139,45 +172,31 @@ export function useImageLibrary({
     })
   }, [])
 
-  // Favorite toggle
+  // Favorite toggle (pure state update, persistence handled by effect)
   const toggleFavorite = useCallback((id: string) => {
-    setLibrary((prev) => {
-      const next = prev.map((item) =>
-        item.id === id ? { ...item, favorite: !item.favorite } : item
-      )
-      persistLibrary(next)
-      return next
-    })
+    setLibrary((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, favorite: !item.favorite } : item))
+    )
   }, [])
 
   // Add items
   const addLibraryItem = useCallback((item: LibraryItem) => {
-    setLibrary((prev) => {
-      const next = [item, ...prev]
-      persistLibrary(next)
-      return next
-    })
+    setLibrary((prev) => [item, ...prev])
   }, [])
 
-  // Update item (e.g. cloudUrl)
+  // Update item
   const updateLibraryItem = useCallback((id: string, updates: Partial<LibraryItem>) => {
-    setLibrary((prev) => {
-      const next = prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
-      persistLibrary(next)
-      return next
-    })
+    setLibrary((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)))
   }, [])
 
   // Update batch items
   const updateBatchItems = useCallback((updatesMap: Map<string, Partial<LibraryItem>>) => {
-    setLibrary((prev) => {
-      const next = prev.map((item) => {
+    setLibrary((prev) =>
+      prev.map((item) => {
         const u = updatesMap.get(item.id)
         return u ? { ...item, ...u } : item
       })
-      persistLibrary(next)
-      return next
-    })
+    )
   }, [])
 
   // Delete items
@@ -189,11 +208,7 @@ export function useImageLibrary({
         '选中的图片将从本地存储中彻底移除，无法恢复。',
         () => {
           const deleteSet = new Set(ids)
-          setLibrary((prev) => {
-            const next = prev.filter((item) => !deleteSet.has(item.id))
-            persistLibrary(next)
-            return next
-          })
+          setLibrary((prev) => prev.filter((item) => !deleteSet.has(item.id)))
           setSelectedImageIds((prev) => {
             const next = new Set(prev)
             ids.forEach((id) => next.delete(id))
@@ -208,14 +223,14 @@ export function useImageLibrary({
     [requestConfirm]
   )
 
-  // Download selected
+  // Download selected using accurate format extension
   const downloadSelected = useCallback(() => {
     const items = library.filter((item) => selectedImageIds.has(item.id))
     if (items.length === 0) return
 
     items.forEach((item, index) => {
       window.setTimeout(() => {
-        downloadImage(item.imageDataUrl, `image-${item.id}-${index + 1}.png`)
+        downloadLibraryItem(item)
       }, index * 120)
     })
     toast.info(`正在下载 ${items.length} 张图片...`)
@@ -241,5 +256,7 @@ export function useImageLibrary({
     deleteSelected,
     downloadSelected,
     clearLibrary,
+    initStatus,
+    retryLoadLibrary: loadLibrary,
   }
 }

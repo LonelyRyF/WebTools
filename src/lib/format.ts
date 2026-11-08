@@ -1,4 +1,4 @@
-import type { GenerationJob } from '@/types/image'
+import type { GenerationJob, LibraryItem } from '@/types/image'
 import { describeResponseStatus } from './api'
 
 export function truncate(value?: string, maxLength = 80): string {
@@ -104,4 +104,9 @@ export function downloadImage(dataUrl: string, filename: string): void {
   document.body.appendChild(link)
   link.click()
   link.remove()
+}
+
+export function downloadLibraryItem(item: LibraryItem): void {
+  const ext = item.outputFormat === 'jpeg' ? 'jpg' : item.outputFormat || 'png'
+  downloadImage(item.imageDataUrl, `image-${item.id}.${ext}`)
 }

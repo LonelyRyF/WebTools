@@ -1,41 +1,23 @@
 import type { ProviderConfig, LibraryItem } from '@/types/image'
 import type { StorageConfig } from '@/types/storage'
-import { downloadImage } from '@/lib/format'
 import { ProviderDialog } from '@/components/image-workspace/ProviderDialog'
 import { StorageDialog } from '@/components/image-workspace/StorageDialog'
 import { ImagePreviewDialog } from '@/components/image-workspace/ImagePreviewDialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-
-export interface ConfirmDialogState {
-  isOpen: boolean
-  title: string
-  description: string
-  confirmText?: string
-  variant?: 'default' | 'destructive'
-  action: () => void
-}
+import { ConfirmDialog } from '@/components/image-workspace/ConfirmDialog'
+import type { ConfirmDialogState } from '@/hooks/useConfirmDialog'
 
 interface WorkspaceDialogsProps {
   // Provider Dialog
   isProviderDialogOpen: boolean
   onProviderDialogChange: (open: boolean) => void
   providers: ProviderConfig[]
-  selectedProviderId: string
-  onSelectProvider: (id: string) => void
   providerForm: ProviderConfig
+  onSelectDraftProvider: (id: string) => void
   onUpdateProviderForm: (form: ProviderConfig) => void
   onSaveProvider: () => void
   onNewProvider: () => void
   onDeleteProvider: () => void
+  isDraftNew?: boolean
 
   // Storage Dialog
   isStorageDialogOpen: boolean
@@ -61,13 +43,13 @@ export function WorkspaceDialogs({
   isProviderDialogOpen,
   onProviderDialogChange,
   providers,
-  selectedProviderId,
-  onSelectProvider,
   providerForm,
+  onSelectDraftProvider,
   onUpdateProviderForm,
   onSaveProvider,
   onNewProvider,
   onDeleteProvider,
+  isDraftNew,
   isStorageDialogOpen,
   onStorageDialogChange,
   storageConfig,
@@ -89,13 +71,13 @@ export function WorkspaceDialogs({
         open={isProviderDialogOpen}
         onOpenChange={onProviderDialogChange}
         providers={providers}
-        selectedProviderId={selectedProviderId}
-        onSelectProvider={onSelectProvider}
         providerForm={providerForm}
+        onSelectDraftProvider={onSelectDraftProvider}
         onUpdateProviderForm={onUpdateProviderForm}
         onSave={onSaveProvider}
         onNew={onNewProvider}
         onDelete={onDeleteProvider}
+        isDraftNew={isDraftNew}
       />
 
       {/* Cloud Storage Settings Dialog (S3 / WebDAV) */}
@@ -115,35 +97,12 @@ export function WorkspaceDialogs({
         currentIndex={previewIndex}
         totalCount={totalCount}
         onReuse={onReuseImage}
-        onDownload={downloadImage}
         onUploadToCloud={onUploadToCloud}
         isCloudConfigured={storageConfig.type !== 'local'}
       />
 
-      {/* Confirmation Alert Dialog */}
-      <AlertDialog
-        open={confirmDialog.isOpen}
-        onOpenChange={(open) => !open && onCloseConfirmDialog()}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{confirmDialog.title}</AlertDialogTitle>
-            <AlertDialogDescription>{confirmDialog.description}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              variant={confirmDialog.variant}
-              onClick={() => {
-                confirmDialog.action()
-                onCloseConfirmDialog()
-              }}
-            >
-              {confirmDialog.confirmText || '确认'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Reused Confirmation Alert Dialog */}
+      <ConfirmDialog dialog={confirmDialog} onClose={onCloseConfirmDialog} />
     </>
   )
 }

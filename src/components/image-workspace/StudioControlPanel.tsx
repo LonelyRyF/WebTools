@@ -1,92 +1,31 @@
-import type {
-  ProviderConfig,
-  ReferenceImage,
-  GenerationJob,
-  QualityTier,
-  SizeTier,
-  OutputFormat,
-} from '@/types/image'
+import type { ReactNode } from 'react'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Sliders, ImageIcon, ListOrdered, Loader2 } from 'lucide-react'
-import { ParamsTab } from './control-panel/ParamsTab'
-import { ReferenceTab } from './control-panel/ReferenceTab'
-import { QueueTab } from './control-panel/QueueTab'
 
 interface StudioControlPanelProps {
-  sidebarTab: 'params' | 'reference' | 'queue'
+  activeTab: 'params' | 'reference' | 'queue'
   onTabChange: (tab: 'params' | 'reference' | 'queue') => void
-  providers: ProviderConfig[]
-  selectedProviderId: string
-  onSelectProvider: (id: string) => void
-  onOpenProviderDialog: () => void
-  aspectRatio: string
-  onAspectRatioChange: (ratio: string) => void
-  availableAspectRatios: string[]
-  sizeTier: SizeTier
-  onSizeTierChange: (tier: SizeTier) => void
-  quality: QualityTier
-  onQualityChange: (q: QualityTier) => void
-  outputFormat: OutputFormat
-  onOutputFormatChange: (fmt: OutputFormat) => void
-  batchCount: number
-  onBatchCountChange: (cnt: number) => void
-  parallelCount: number
-  onParallelCountChange: (cnt: number) => void
-  references: ReferenceImage[]
-  onRemoveReference: (id: string) => void
-  onClearReferences: () => void
-  onFileInputClick: () => void
-  onFilesDrop: (files: FileList) => void
-  batchStats: {
-    total: number
-    running: number
-    success: number
-    error: number
-    finished: number
-    queued: number
-  }
-  focusedBatchId: string | null
-  batchJobs: GenerationJob[]
+  referenceCount: number
   isGenerating: boolean
+  params: ReactNode
+  reference: ReactNode
+  queue: ReactNode
 }
 
-export function StudioControlPanel(props: StudioControlPanelProps) {
-  const {
-    sidebarTab,
-    onTabChange,
-    references,
-    isGenerating,
-    providers,
-    selectedProviderId,
-    onSelectProvider,
-    onOpenProviderDialog,
-    aspectRatio,
-    onAspectRatioChange,
-    availableAspectRatios,
-    sizeTier,
-    onSizeTierChange,
-    quality,
-    onQualityChange,
-    outputFormat,
-    onOutputFormatChange,
-    batchCount,
-    onBatchCountChange,
-    parallelCount,
-    onParallelCountChange,
-    onRemoveReference,
-    onClearReferences,
-    onFileInputClick,
-    onFilesDrop,
-    batchStats,
-    focusedBatchId,
-    batchJobs,
-  } = props
-
+export function StudioControlPanel({
+  activeTab,
+  onTabChange,
+  referenceCount,
+  isGenerating,
+  params,
+  reference,
+  queue,
+}: StudioControlPanelProps) {
   return (
     <Card className="border-border/80 bg-card shadow-xs lg:sticky lg:top-16">
       <Tabs
-        value={sidebarTab}
+        value={activeTab}
         onValueChange={(val) => onTabChange(val as 'params' | 'reference' | 'queue')}
         className="w-full"
       >
@@ -98,7 +37,7 @@ export function StudioControlPanel(props: StudioControlPanelProps) {
             </TabsTrigger>
             <TabsTrigger value="reference" className="gap-1.5 text-xs h-6.5">
               <ImageIcon className="size-3.5" />
-              参考 ({references.length})
+              参考 ({referenceCount})
             </TabsTrigger>
             <TabsTrigger value="queue" className="gap-1.5 text-xs h-6.5">
               <ListOrdered className="size-3.5" />
@@ -109,44 +48,15 @@ export function StudioControlPanel(props: StudioControlPanelProps) {
 
         <CardContent className="p-3.5 pt-3">
           <TabsContent value="params" className="mt-0 outline-none">
-            <ParamsTab
-              providers={providers}
-              selectedProviderId={selectedProviderId}
-              onSelectProvider={onSelectProvider}
-              onOpenProviderDialog={onOpenProviderDialog}
-              aspectRatio={aspectRatio}
-              onAspectRatioChange={onAspectRatioChange}
-              availableAspectRatios={availableAspectRatios}
-              sizeTier={sizeTier}
-              onSizeTierChange={onSizeTierChange}
-              quality={quality}
-              onQualityChange={onQualityChange}
-              outputFormat={outputFormat}
-              onOutputFormatChange={onOutputFormatChange}
-              batchCount={batchCount}
-              onBatchCountChange={onBatchCountChange}
-              parallelCount={parallelCount}
-              onParallelCountChange={onParallelCountChange}
-            />
+            {params}
           </TabsContent>
 
           <TabsContent value="reference" className="mt-0 outline-none">
-            <ReferenceTab
-              references={references}
-              onRemoveReference={onRemoveReference}
-              onClearReferences={onClearReferences}
-              onFileInputClick={onFileInputClick}
-              onFilesDrop={onFilesDrop}
-            />
+            {reference}
           </TabsContent>
 
           <TabsContent value="queue" className="mt-0 outline-none">
-            <QueueTab
-              batchStats={batchStats}
-              focusedBatchId={focusedBatchId}
-              batchJobs={batchJobs}
-              isGenerating={isGenerating}
-            />
+            {queue}
           </TabsContent>
         </CardContent>
       </Tabs>

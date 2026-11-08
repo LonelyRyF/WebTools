@@ -1,4 +1,3 @@
-import { useState, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Header } from '@/components/Header'
 import { Home } from '@/pages/Home'
@@ -8,28 +7,16 @@ import { Toaster } from '@/components/ui/sonner'
 const CURRENT_YEAR = new Date().getFullYear()
 
 export function App() {
-  const [clearLibraryCb, setClearLibraryCb] = useState<(() => void) | null>(null)
-
-  const handleRegisterClear = useCallback((cb: () => void) => {
-    setClearLibraryCb(() => cb)
-  }, [])
-
   return (
     <BrowserRouter>
       <div className="relative min-h-screen flex flex-col bg-background text-foreground selection:bg-primary selection:text-primary-foreground">
         <Toaster />
         <div className="ambient-bg" aria-hidden="true" />
-        <Header
-          onClearLibrary={() => clearLibraryCb?.()}
-          showClearLibrary={Boolean(clearLibraryCb)}
-        />
+        <Header />
         <main className="flex-1 relative z-10">
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route
-              path="/image"
-              element={<ImageWorkspace onRegisterClear={handleRegisterClear} />}
-            />
+            <Route path="/image" element={<ImageWorkspace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

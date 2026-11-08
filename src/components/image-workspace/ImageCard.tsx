@@ -1,5 +1,5 @@
 import type { LibraryItem } from '@/types/image'
-import { formatDate } from '@/lib/format'
+import { formatDate, downloadLibraryItem } from '@/lib/format'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,9 +11,8 @@ interface ImageCardProps {
   isSelected: boolean
   onToggleSelect: (id: string) => void
   onToggleFavorite: (id: string) => void
-  onOpenPreview: (item: LibraryItem) => void
+  onOpenPreview: (id: string) => void
   onReuse: (id: string) => void
-  onDownload: (dataUrl: string, filename: string) => void
   onDelete: (id: string) => void
   onUploadToCloud?: (item: LibraryItem) => void
   isCloudConfigured?: boolean
@@ -26,7 +25,6 @@ export function ImageCard({
   onToggleFavorite,
   onOpenPreview,
   onReuse,
-  onDownload,
   onDelete,
   onUploadToCloud,
   isCloudConfigured,
@@ -39,7 +37,7 @@ export function ImageCard({
     >
       {/* Media Box */}
       <div
-        onClick={() => onOpenPreview(item)}
+        onClick={() => onOpenPreview(item.id)}
         className="relative aspect-4/5 cursor-zoom-in overflow-hidden bg-muted shrink-0"
       >
         <img
@@ -138,7 +136,7 @@ export function ImageCard({
             <Button
               variant="ghost"
               size="xs"
-              onClick={() => onDownload(item.imageDataUrl, `image-${item.id}.png`)}
+              onClick={() => downloadLibraryItem(item)}
               className="h-6 px-1 text-[10px] sm:px-1.5"
               title="下载"
             >
